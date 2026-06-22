@@ -1,6 +1,9 @@
 package jsonldb
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 type tSession struct {
 	ID       string `json:"id"`
@@ -48,5 +51,54 @@ func TestTypedRoundTrip(t *testing.T) {
 	// aggregation via Raw()
 	if sum, ok := db.Where(Eq("topic", "ml")).Raw().Sum("duration"); !ok || sum != 2700 {
 		t.Errorf("Raw Sum = %v", sum)
+	}
+}
+
+// tBadDecode is used to create a type mismatch: the fixture stores "duration"
+// as a string but tBadSession declares it as int, so json.Unmarshal errors.
+type tBadSession struct {
+	ID       string `json:"id"`
+	Duration int    `json:"duration"` // conflicts with stored `"duration":"notanumber"`
+}
+
+// TestTypedUpdateAbortOnDecodeError verifies that if a matched doc cannot be
+// decoded into T, typed Update:
+//   (a) returns a non-nil error,
+//   (b) returns count 0,
+//   (c) leaves the file on disk UNCHANGED.
+func TestTypedUpdateAbortOnDecodeError(t *testing.T) {
+	// Build a fixture with two docs.  The second doc has duration as a string,
+	// which will cause json.Unmarshal into tBadSession.Duration (int) to fail.
+	fixture := "{\"id\":\"ok\",\"duration\":42}\n{\"id\":\"bad\",\"duration\":\"notanumber\"}\n"
+	c := openFixture(t, fixture)
+	db := Typed[tBadSession](c)
+
+	// Capture raw bytes BEFORE the call.
+	before, err := os.ReadFile(c.Path())
+	if err != nil {
+		t.Fatalf("ReadFile before: %v", err)
+	}
+
+	// Predicate matches BOTH docs; the second will fail to decode.
+	n, updateErr := db.Update(func(d Doc) bool { return true }, func(s tBadSession) tBadSession {
+		s.ID += "_updated"
+		return s
+	})
+
+	// (a) error must be non-nil
+	if updateErr == nil {
+		t.Errorf("Update: expected decode error, got nil")
+	}
+	// (b) count must be 0
+	if n != 0 {
+		t.Errorf("Update: count = %d, want 0", n)
+	}
+	// (c) file must be unchanged
+	after, err := os.ReadFile(c.Path())
+	if err != nil {
+		t.Fatalf("ReadFile after: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("file was modified despite decode error\nbefore: %q\nafter:  %q", before, after)
 	}
 }

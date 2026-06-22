@@ -92,6 +92,9 @@ func (c *Collection) Keys() []string {
 
 // Sample returns up to n docs from the head.
 func (c *Collection) Sample(n int) []Doc {
+	if n < 0 {
+		n = 0
+	}
 	if n > len(c.docs) {
 		n = len(c.docs)
 	}

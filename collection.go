@@ -211,13 +211,18 @@ func (c *Collection) rewrite(lines [][]byte) error {
 	return c.scan()
 }
 
-// Update applies mut to every doc matching p; returns the count changed.
-func (c *Collection) Update(p Predicate, mut func(Doc) Doc) (int, error) {
+// updateChecked applies mut to every doc matching p; if mut returns a non-nil
+// error for ANY matched doc the file is NOT rewritten and (0, err) is returned.
+// Otherwise it rewrites once and returns the true count.
+func (c *Collection) updateChecked(p Predicate, mut func(Doc) (Doc, error)) (int, error) {
 	n := 0
 	lines := make([][]byte, 0, len(c.docs))
 	for _, d := range c.docs {
 		if p(d) {
-			nd := mut(d)
+			nd, err := mut(d)
+			if err != nil {
+				return 0, err
+			}
 			b, err := nd.MarshalJSON()
 			if err != nil {
 				return 0, err
@@ -232,6 +237,11 @@ func (c *Collection) Update(p Predicate, mut func(Doc) Doc) (int, error) {
 		return 0, nil
 	}
 	return n, c.rewrite(lines)
+}
+
+// Update applies mut to every doc matching p; returns the count changed.
+func (c *Collection) Update(p Predicate, mut func(Doc) Doc) (int, error) {
+	return c.updateChecked(p, func(d Doc) (Doc, error) { return mut(d), nil })
 }
 
 // Replace swaps every doc matching p with d.

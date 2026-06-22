@@ -117,24 +117,13 @@ func (t *TypedCollection[T]) AppendAll(vs []T) error {
 }
 
 func (t *TypedCollection[T]) Update(p Predicate, mut func(T) T) (int, error) {
-	var derr error
-	n, err := t.c.Update(p, func(d Doc) Doc {
-		v, e := decode[T](d)
-		if e != nil {
-			derr = e
-			return d
+	return t.c.updateChecked(p, func(d Doc) (Doc, error) {
+		v, err := decode[T](d)
+		if err != nil {
+			return Doc{}, err
 		}
-		nd, e := toDoc[T](mut(v))
-		if e != nil {
-			derr = e
-			return d
-		}
-		return nd
+		return toDoc[T](mut(v))
 	})
-	if derr != nil {
-		return 0, derr
-	}
-	return n, err
 }
 
 func (t *TypedCollection[T]) Replace(p Predicate, v T) (int, error) {

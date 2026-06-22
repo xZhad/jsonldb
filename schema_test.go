@@ -35,4 +35,7 @@ func TestSchemaKeysSample(t *testing.T) {
 	if len(c.Sample(99)) != 3 {
 		t.Errorf("Sample(99) should cap at 3")
 	}
+	if got := c.Sample(-1); len(got) != 0 {
+		t.Errorf("Sample(-1) = %d docs, want 0 (no panic)", len(got))
+	}
 }
