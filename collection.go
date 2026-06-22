@@ -196,50 +196,44 @@ func expandPath(path string) (string, error) {
 	return filepath.Abs(path)
 }
 
-// Append writes one doc as a JSON line at the end of the file (atomic rewrite).
-func (c *Collection) Append(d Doc) error {
-	return c.AppendAll([]Doc{d})
+type recordSrc struct {
+	idx         int
+	replacement []byte // nil ⇒ copy original bytes of index[idx]
 }
 
-// AppendAll appends multiple docs in a single atomic rewrite.
-func (c *Collection) AppendAll(ds []Doc) error {
-	lines := make([][]byte, 0, len(c.index)+len(ds))
-	for i := range c.index {
-		if d, ok := c.mustDoc(i); ok {
-			lines = append(lines, d.Raw())
-		}
-	}
-	for _, d := range ds {
-		b, err := d.MarshalJSON()
-		if err != nil {
-			return err
-		}
-		lines = append(lines, b)
-	}
-	return c.rewrite(lines)
-}
-
-// rewrite writes lines atomically (temp file + rename), then re-scans.
-func (c *Collection) rewrite(lines [][]byte) error {
+func (c *Collection) rewriteRecords(srcs []recordSrc) error {
 	dir := filepath.Dir(c.path)
 	tmp, err := os.CreateTemp(dir, ".jsonldb-*.tmp")
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op if rename succeeded
-
+	defer os.Remove(tmpName)
 	w := bufio.NewWriter(tmp)
-	for _, ln := range lines {
-		ln = bytes.TrimRight(ln, "\n")
-		if len(bytes.TrimSpace(ln)) == 0 {
+	writeLine := func(b []byte) error {
+		b = bytes.TrimRight(b, "\n")
+		if len(bytes.TrimSpace(b)) == 0 {
+			return nil
+		}
+		if _, err := w.Write(b); err != nil {
+			return err
+		}
+		return w.WriteByte('\n')
+	}
+	for _, s := range srcs {
+		if s.replacement != nil {
+			if err := writeLine(s.replacement); err != nil {
+				tmp.Close()
+				return err
+			}
 			continue
 		}
-		if _, err := w.Write(ln); err != nil {
+		raw, err := c.readRaw(s.idx)
+		if err != nil {
 			tmp.Close()
 			return err
 		}
-		if err := w.WriteByte('\n'); err != nil {
+		if err := writeLine(raw); err != nil {
 			tmp.Close()
 			return err
 		}
@@ -261,18 +255,34 @@ func (c *Collection) rewrite(lines [][]byte) error {
 	return c.scan()
 }
 
+// Append writes one doc as a JSON line at the end of the file (atomic rewrite).
+func (c *Collection) Append(d Doc) error { return c.AppendAll([]Doc{d}) }
+
+// AppendAll appends multiple docs in a single atomic rewrite.
+func (c *Collection) AppendAll(ds []Doc) error {
+	srcs := make([]recordSrc, 0, len(c.index)+len(ds))
+	for i := range c.index {
+		srcs = append(srcs, recordSrc{idx: i})
+	}
+	for _, d := range ds {
+		b, err := d.MarshalJSON()
+		if err != nil {
+			return err
+		}
+		srcs = append(srcs, recordSrc{idx: -1, replacement: b})
+	}
+	return c.rewriteRecords(srcs)
+}
+
 // updateChecked applies mut to every doc matching p; if mut returns a non-nil
 // error for ANY matched doc the file is NOT rewritten and (0, err) is returned.
 // Otherwise it rewrites once and returns the true count.
 func (c *Collection) updateChecked(p Predicate, mut func(Doc) (Doc, error)) (int, error) {
 	n := 0
-	lines := make([][]byte, 0, len(c.index))
+	srcs := make([]recordSrc, 0, len(c.index))
 	for i := range c.index {
 		d, ok := c.mustDoc(i)
-		if !ok {
-			continue
-		}
-		if p.Match(d) {
+		if ok && p.Match(d) {
 			nd, err := mut(d)
 			if err != nil {
 				return 0, err
@@ -281,16 +291,16 @@ func (c *Collection) updateChecked(p Predicate, mut func(Doc) (Doc, error)) (int
 			if err != nil {
 				return 0, err
 			}
-			lines = append(lines, b)
+			srcs = append(srcs, recordSrc{idx: -1, replacement: b})
 			n++
 		} else {
-			lines = append(lines, d.Raw())
+			srcs = append(srcs, recordSrc{idx: i})
 		}
 	}
 	if n == 0 {
 		return 0, nil
 	}
-	return n, c.rewrite(lines)
+	return n, c.rewriteRecords(srcs)
 }
 
 // Update applies mut to every doc matching p; returns the count changed.
@@ -306,60 +316,53 @@ func (c *Collection) Replace(p Predicate, d Doc) (int, error) {
 // DeleteWhere removes every doc matching p; returns the count removed.
 func (c *Collection) DeleteWhere(p Predicate) (int, error) {
 	n := 0
-	lines := make([][]byte, 0, len(c.index))
+	srcs := make([]recordSrc, 0, len(c.index))
 	for i := range c.index {
 		d, ok := c.mustDoc(i)
-		if !ok {
-			continue
-		}
-		if p.Match(d) {
+		if ok && p.Match(d) {
 			n++
 			continue
 		}
-		lines = append(lines, d.Raw())
+		srcs = append(srcs, recordSrc{idx: i})
 	}
 	if n == 0 {
 		return 0, nil
 	}
-	return n, c.rewrite(lines)
+	return n, c.rewriteRecords(srcs)
 }
 
 // DeleteAt removes the doc at the given 1-based scan line.
 func (c *Collection) DeleteAt(line int) error {
-	lines := make([][]byte, 0, len(c.index))
+	srcs := make([]recordSrc, 0, len(c.index))
 	found := false
 	for i := range c.index {
-		d, ok := c.mustDoc(i)
-		if !ok {
-			continue
-		}
-		if d.Line() == line {
+		if c.index[i].line == line {
 			found = true
 			continue
 		}
-		lines = append(lines, d.Raw())
+		srcs = append(srcs, recordSrc{idx: i})
 	}
 	if !found {
 		return nil
 	}
-	return c.rewrite(lines)
+	return c.rewriteRecords(srcs)
 }
 
 // Compact rewrites the file, dropping blank lines and exact-duplicate records.
 func (c *Collection) Compact() error {
 	seen := map[string]bool{}
-	lines := make([][]byte, 0, len(c.index))
+	srcs := make([]recordSrc, 0, len(c.index))
 	for i := range c.index {
-		d, ok := c.mustDoc(i)
-		if !ok {
+		raw, err := c.readRaw(i)
+		if err != nil {
 			continue
 		}
-		key := string(d.Raw())
+		key := string(raw)
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		lines = append(lines, d.Raw())
+		srcs = append(srcs, recordSrc{idx: i})
 	}
-	return c.rewrite(lines)
+	return c.rewriteRecords(srcs)
 }
