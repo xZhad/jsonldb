@@ -210,3 +210,80 @@ func (c *Collection) rewrite(lines [][]byte) error {
 	}
 	return c.scan()
 }
+
+// Update applies mut to every doc matching p; returns the count changed.
+func (c *Collection) Update(p Predicate, mut func(Doc) Doc) (int, error) {
+	n := 0
+	lines := make([][]byte, 0, len(c.docs))
+	for _, d := range c.docs {
+		if p(d) {
+			nd := mut(d)
+			b, err := nd.MarshalJSON()
+			if err != nil {
+				return 0, err
+			}
+			lines = append(lines, b)
+			n++
+		} else {
+			lines = append(lines, d.Raw())
+		}
+	}
+	if n == 0 {
+		return 0, nil
+	}
+	return n, c.rewrite(lines)
+}
+
+// Replace swaps every doc matching p with d.
+func (c *Collection) Replace(p Predicate, d Doc) (int, error) {
+	return c.Update(p, func(Doc) Doc { return d })
+}
+
+// DeleteWhere removes every doc matching p; returns the count removed.
+func (c *Collection) DeleteWhere(p Predicate) (int, error) {
+	n := 0
+	lines := make([][]byte, 0, len(c.docs))
+	for _, d := range c.docs {
+		if p(d) {
+			n++
+			continue
+		}
+		lines = append(lines, d.Raw())
+	}
+	if n == 0 {
+		return 0, nil
+	}
+	return n, c.rewrite(lines)
+}
+
+// DeleteAt removes the doc at the given 1-based scan line.
+func (c *Collection) DeleteAt(line int) error {
+	lines := make([][]byte, 0, len(c.docs))
+	found := false
+	for _, d := range c.docs {
+		if d.Line() == line {
+			found = true
+			continue
+		}
+		lines = append(lines, d.Raw())
+	}
+	if !found {
+		return nil
+	}
+	return c.rewrite(lines)
+}
+
+// Compact rewrites the file, dropping blank lines and exact-duplicate records.
+func (c *Collection) Compact() error {
+	seen := map[string]bool{}
+	lines := make([][]byte, 0, len(c.docs))
+	for _, d := range c.docs {
+		key := string(d.Raw())
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		lines = append(lines, d.Raw())
+	}
+	return c.rewrite(lines)
+}
