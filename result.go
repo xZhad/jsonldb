@@ -173,26 +173,27 @@ func valueKey(v any) string {
 // SortBy returns a new Result sorted by field using the coercion ladder.
 // Docs missing the field sort last.
 func (r *Result) SortBy(field string, desc bool) *Result {
-	idx := make([]int, len(r.idx))
-	copy(idx, r.idx)
-	sort.SliceStable(idx, func(a, b int) bool {
-		da, oka := r.col.mustDoc(idx[a])
-		db, okb := r.col.mustDoc(idx[b])
-		var vi, vj any
-		var pi, pj bool
-		if oka {
-			vi, pi = da.Get(field)
+	type kv struct {
+		i       int
+		v       any
+		present bool
+	}
+	items := make([]kv, len(r.idx))
+	for n, i := range r.idx {
+		it := kv{i: i}
+		if d, ok := r.col.mustDoc(i); ok {
+			it.v, it.present = d.Get(field)
 		}
-		if okb {
-			vj, pj = db.Get(field)
-		}
-		if !pi || !pj {
-			if pi != pj {
-				return pi
+		items[n] = it
+	}
+	sort.SliceStable(items, func(a, b int) bool {
+		if !items[a].present || !items[b].present {
+			if items[a].present != items[b].present {
+				return items[a].present
 			}
 			return false
 		}
-		cc, ok := compareValues(vi, vj)
+		cc, ok := compareValues(items[a].v, items[b].v)
 		if !ok {
 			return false
 		}
@@ -201,6 +202,10 @@ func (r *Result) SortBy(field string, desc bool) *Result {
 		}
 		return cc < 0
 	})
+	idx := make([]int, len(items))
+	for n, it := range items {
+		idx[n] = it.i
+	}
 	return &Result{col: r.col, idx: idx}
 }
 

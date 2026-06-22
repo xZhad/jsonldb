@@ -32,3 +32,19 @@ func TestSortAndPage(t *testing.T) {
 		t.Errorf("Page(2,1) = %v", pg)
 	}
 }
+
+func TestSortByExtractsOncePerRecord(t *testing.T) {
+	c := openFixture(t, `{"id":"a","dur":900}
+{"id":"b","dur":1500}
+{"id":"c","dur":1200}
+`)
+	r := c.Where(predTrue())
+	asc := r.SortBy("dur", false).Docs()
+	if asc[0].GetString("id") != "a" || asc[2].GetString("id") != "b" {
+		t.Errorf("asc order wrong")
+	}
+	// receiver not mutated
+	if r.Docs()[0].GetString("id") != "a" {
+		t.Errorf("SortBy mutated receiver")
+	}
+}
