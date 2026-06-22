@@ -2,6 +2,7 @@ package jsonldb
 
 import (
 	"bufio"
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -145,4 +146,67 @@ func expandPath(path string) (string, error) {
 		return filepath.Join(home, path[2:]), nil
 	}
 	return filepath.Abs(path)
+}
+
+// Append writes one doc as a JSON line at the end of the file (atomic rewrite).
+func (c *Collection) Append(d Doc) error {
+	return c.AppendAll([]Doc{d})
+}
+
+// AppendAll appends multiple docs in a single atomic rewrite.
+func (c *Collection) AppendAll(ds []Doc) error {
+	lines := make([][]byte, 0, len(c.docs)+len(ds))
+	for _, d := range c.docs {
+		lines = append(lines, d.Raw())
+	}
+	for _, d := range ds {
+		b, err := d.MarshalJSON()
+		if err != nil {
+			return err
+		}
+		lines = append(lines, b)
+	}
+	return c.rewrite(lines)
+}
+
+// rewrite writes lines atomically (temp file + rename), then re-scans.
+func (c *Collection) rewrite(lines [][]byte) error {
+	dir := filepath.Dir(c.path)
+	tmp, err := os.CreateTemp(dir, ".jsonldb-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op if rename succeeded
+
+	w := bufio.NewWriter(tmp)
+	for _, ln := range lines {
+		ln = bytes.TrimRight(ln, "\n")
+		if len(bytes.TrimSpace(ln)) == 0 {
+			continue
+		}
+		if _, err := w.Write(ln); err != nil {
+			tmp.Close()
+			return err
+		}
+		if err := w.WriteByte('\n'); err != nil {
+			tmp.Close()
+			return err
+		}
+	}
+	if err := w.Flush(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, c.path); err != nil {
+		return err
+	}
+	return c.scan()
 }
