@@ -5,38 +5,52 @@ import (
 	"sort"
 )
 
-// Result is a chainable view over a filtered set of Docs.
+// Result is a chainable view over a filtered set of Docs, backed by index positions.
 type Result struct {
-	docs []Doc
+	col *Collection
+	idx []int
 }
 
-func (r *Result) Docs() []Doc { return r.docs }
-func (r *Result) Count() int  { return len(r.docs) }
+func (r *Result) Docs() []Doc {
+	out := make([]Doc, 0, len(r.idx))
+	for _, i := range r.idx {
+		if d, ok := r.col.mustDoc(i); ok {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func (r *Result) Count() int { return len(r.idx) }
 
 func (r *Result) First() (Doc, bool) {
-	if len(r.docs) == 0 {
+	if len(r.idx) == 0 {
 		return Doc{}, false
 	}
-	return r.docs[0], true
+	return r.col.mustDoc(r.idx[0])
 }
 
 func (r *Result) Last() (Doc, bool) {
-	if len(r.docs) == 0 {
+	if len(r.idx) == 0 {
 		return Doc{}, false
 	}
-	return r.docs[len(r.docs)-1], true
+	return r.col.mustDoc(r.idx[len(r.idx)-1])
 }
 
 func (r *Result) GroupByFunc(fn func(Doc) string) map[string]*Result {
 	out := map[string]*Result{}
-	for _, d := range r.docs {
+	for _, i := range r.idx {
+		d, ok := r.col.mustDoc(i)
+		if !ok {
+			continue
+		}
 		k := fn(d)
 		g := out[k]
 		if g == nil {
-			g = &Result{}
+			g = &Result{col: r.col}
 			out[k] = g
 		}
-		g.docs = append(g.docs, d)
+		g.idx = append(g.idx, i)
 	}
 	return out
 }
@@ -52,9 +66,11 @@ func (r *Result) GroupBy(field string) map[string]*Result {
 
 func (r *Result) CountBy(field string) map[string]int {
 	out := map[string]int{}
-	for _, d := range r.docs {
-		if v, ok := d.Get(field); ok {
-			out[valueKey(v)]++
+	for _, i := range r.idx {
+		if d, ok := r.col.mustDoc(i); ok {
+			if v, ok := d.Get(field); ok {
+				out[valueKey(v)]++
+			}
 		}
 	}
 	return out
@@ -63,12 +79,14 @@ func (r *Result) CountBy(field string) map[string]int {
 func (r *Result) Distinct(field string) []any {
 	var out []any
 	seen := map[string]bool{}
-	for _, d := range r.docs {
-		if v, ok := d.Get(field); ok {
-			k := valueKey(v)
-			if !seen[k] {
-				seen[k] = true
-				out = append(out, v)
+	for _, i := range r.idx {
+		if d, ok := r.col.mustDoc(i); ok {
+			if v, ok := d.Get(field); ok {
+				k := valueKey(v)
+				if !seen[k] {
+					seen[k] = true
+					out = append(out, v)
+				}
 			}
 		}
 	}
@@ -77,9 +95,11 @@ func (r *Result) Distinct(field string) []any {
 
 func (r *Result) floats(field string) []float64 {
 	var out []float64
-	for _, d := range r.docs {
-		if f, ok := d.GetFloat(field); ok {
-			out = append(out, f)
+	for _, i := range r.idx {
+		if d, ok := r.col.mustDoc(i); ok {
+			if f, ok := d.GetFloat(field); ok {
+				out = append(out, f)
+			}
 		}
 	}
 	return out
@@ -159,53 +179,61 @@ func valueKey(v any) string {
 // SortBy returns a new Result sorted by field using the coercion ladder.
 // Docs missing the field sort last.
 func (r *Result) SortBy(field string, desc bool) *Result {
-	cp := make([]Doc, len(r.docs))
-	copy(cp, r.docs)
-	sort.SliceStable(cp, func(i, j int) bool {
-		vi, oki := cp[i].Get(field)
-		vj, okj := cp[j].Get(field)
-		if !oki || !okj {
-			if oki != okj {
-				return oki // present sorts before missing
+	idx := make([]int, len(r.idx))
+	copy(idx, r.idx)
+	sort.SliceStable(idx, func(a, b int) bool {
+		da, oka := r.col.mustDoc(idx[a])
+		db, okb := r.col.mustDoc(idx[b])
+		var vi, vj any
+		var pi, pj bool
+		if oka {
+			vi, pi = da.Get(field)
+		}
+		if okb {
+			vj, pj = db.Get(field)
+		}
+		if !pi || !pj {
+			if pi != pj {
+				return pi
 			}
 			return false
 		}
-		c, ok := compareValues(vi, vj)
+		cc, ok := compareValues(vi, vj)
 		if !ok {
 			return false
 		}
 		if desc {
-			return c > 0
+			return cc > 0
 		}
-		return c < 0
+		return cc < 0
 	})
-	return &Result{docs: cp}
+	return &Result{col: r.col, idx: idx}
 }
 
 func (r *Result) Limit(n int) *Result {
 	if n < 0 {
 		n = 0
 	}
-	if n > len(r.docs) {
-		n = len(r.docs)
+	if n > len(r.idx) {
+		n = len(r.idx)
 	}
-	return &Result{docs: r.docs[:n]}
+	return &Result{col: r.col, idx: r.idx[:n]}
 }
 
 func (r *Result) Offset(n int) *Result {
 	if n < 0 {
 		n = 0
 	}
-	if n > len(r.docs) {
-		n = len(r.docs)
+	if n > len(r.idx) {
+		n = len(r.idx)
 	}
-	return &Result{docs: r.docs[n:]}
+	return &Result{col: r.col, idx: r.idx[n:]}
 }
 
 // Page returns 1-based page num of the given size.
 func (r *Result) Page(num, size int) *Result {
 	if num < 1 || size < 1 {
-		return &Result{}
+		return &Result{col: r.col}
 	}
 	return r.Offset((num - 1) * size).Limit(size)
 }

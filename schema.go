@@ -34,14 +34,18 @@ func jsonType(v any) string {
 
 // Schema infers per-key types, presence, and a sample value across all docs.
 func (c *Collection) Schema() Schema {
-	total := float64(len(c.docs))
+	total := float64(len(c.index))
 	type acc struct {
 		count  int
 		types  map[string]bool
 		sample any
 	}
 	accs := map[string]*acc{}
-	for _, d := range c.docs {
+	for i := range c.index {
+		d, ok := c.mustDoc(i)
+		if !ok {
+			continue
+		}
 		for k, v := range d.m {
 			a := accs[k]
 			if a == nil {
@@ -77,9 +81,11 @@ func (c *Collection) Schema() Schema {
 // Keys returns the sorted union of all keys.
 func (c *Collection) Keys() []string {
 	set := map[string]bool{}
-	for _, d := range c.docs {
-		for k := range d.m {
-			set[k] = true
+	for i := range c.index {
+		if d, ok := c.mustDoc(i); ok {
+			for k := range d.m {
+				set[k] = true
+			}
 		}
 	}
 	keys := make([]string, 0, len(set))
@@ -95,8 +101,14 @@ func (c *Collection) Sample(n int) []Doc {
 	if n < 0 {
 		n = 0
 	}
-	if n > len(c.docs) {
-		n = len(c.docs)
+	if n > len(c.index) {
+		n = len(c.index)
 	}
-	return c.docs[:n]
+	out := make([]Doc, 0, n)
+	for i := 0; i < n; i++ {
+		if d, ok := c.mustDoc(i); ok {
+			out = append(out, d)
+		}
+	}
+	return out
 }

@@ -8,10 +8,9 @@ import (
 	"strings"
 )
 
-// Collection is a file-backed JSONL store, loaded fully into memory.
+// Collection is a file-backed JSONL store.
 type Collection struct {
 	path      string
-	docs      []Doc
 	file      *os.File // held open for the writer lock (Task 6)
 	threshold int64
 	cacheCap  int
@@ -72,74 +71,82 @@ func (c *Collection) Close() error {
 }
 
 func (c *Collection) scan() error {
-	f, err := os.Open(c.path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	var docs []Doc
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1024*1024), 16*1024*1024)
-	lineNo := 0
-	for sc.Scan() {
-		lineNo++
-		line := sc.Bytes()
-		if len(strings.TrimSpace(string(line))) == 0 {
-			continue
-		}
-		d, err := parseDoc(line, lineNo)
-		if err != nil {
-			return err
-		}
-		docs = append(docs, d)
-	}
-	if err := sc.Err(); err != nil {
-		return err
-	}
-	c.docs = docs
 	if err := c.buildIndex(); err != nil {
 		return err
 	}
-	c.cache = nil
+	fi, err := os.Stat(c.path)
+	if err != nil {
+		return err
+	}
+	c.lazy = fi.Size() > c.threshold
+	c.cache = map[int]Doc{}
 	c.order = nil
+	if !c.lazy {
+		// eager: parse everything now; a malformed line is fatal (as before)
+		for i := range c.index {
+			if _, err := c.materialize(i); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
-func (c *Collection) All() []Doc { return c.docs }
+func (c *Collection) All() []Doc {
+	out := make([]Doc, 0, len(c.index))
+	for i := range c.index {
+		if d, ok := c.mustDoc(i); ok {
+			out = append(out, d)
+		}
+	}
+	return out
+}
 
 func (c *Collection) Each(fn func(Doc) bool) {
-	for _, d := range c.docs {
+	for i := range c.index {
+		d, ok := c.mustDoc(i)
+		if !ok {
+			continue
+		}
 		if !fn(d) {
 			return
 		}
 	}
 }
 
-func (c *Collection) Count() int { return len(c.docs) }
+func (c *Collection) Count() int { return len(c.index) }
 
 func (c *Collection) First() (Doc, bool) {
-	if len(c.docs) == 0 {
+	if len(c.index) == 0 {
 		return Doc{}, false
 	}
-	return c.docs[0], true
+	return c.mustDoc(0)
 }
 
 func (c *Collection) Last() (Doc, bool) {
-	if len(c.docs) == 0 {
+	if len(c.index) == 0 {
 		return Doc{}, false
 	}
-	return c.docs[len(c.docs)-1], true
+	return c.mustDoc(len(c.index) - 1)
 }
 
 // Where returns a Result of docs matching p.
 func (c *Collection) Where(p Predicate) *Result {
-	var out []Doc
-	for _, d := range c.docs {
-		if p.Match(d) {
-			out = append(out, d)
+	var idx []int
+	for i := range c.index {
+		raw, err := c.readRaw(i)
+		if err != nil {
+			continue
+		}
+		if p.rawReject(raw) {
+			continue
+		}
+		d, ok := c.mustDoc(i)
+		if ok && p.Match(d) {
+			idx = append(idx, i)
 		}
 	}
-	return &Result{docs: out}
+	return &Result{col: c, idx: idx}
 }
 
 // Query parses a DSL string and returns the matching Result.
@@ -153,8 +160,15 @@ func (c *Collection) Query(dsl string) (*Result, error) {
 
 // Find returns the first doc matching p.
 func (c *Collection) Find(p Predicate) (Doc, bool) {
-	for _, d := range c.docs {
-		if p.Match(d) {
+	for i := range c.index {
+		raw, err := c.readRaw(i)
+		if err != nil {
+			continue
+		}
+		if p.rawReject(raw) {
+			continue
+		}
+		if d, ok := c.mustDoc(i); ok && p.Match(d) {
 			return d, true
 		}
 	}
@@ -179,9 +193,11 @@ func (c *Collection) Append(d Doc) error {
 
 // AppendAll appends multiple docs in a single atomic rewrite.
 func (c *Collection) AppendAll(ds []Doc) error {
-	lines := make([][]byte, 0, len(c.docs)+len(ds))
-	for _, d := range c.docs {
-		lines = append(lines, d.Raw())
+	lines := make([][]byte, 0, len(c.index)+len(ds))
+	for i := range c.index {
+		if d, ok := c.mustDoc(i); ok {
+			lines = append(lines, d.Raw())
+		}
 	}
 	for _, d := range ds {
 		b, err := d.MarshalJSON()
@@ -232,6 +248,15 @@ func (c *Collection) rewrite(lines [][]byte) error {
 	if err := os.Rename(tmpName, c.path); err != nil {
 		return err
 	}
+	// Reopen c.file so readRaw sees the new file content.
+	if c.file != nil {
+		c.file.Close()
+	}
+	newFile, err := os.OpenFile(c.path, os.O_RDWR, 0644)
+	if err != nil {
+		return err
+	}
+	c.file = newFile
 	return c.scan()
 }
 
@@ -240,8 +265,12 @@ func (c *Collection) rewrite(lines [][]byte) error {
 // Otherwise it rewrites once and returns the true count.
 func (c *Collection) updateChecked(p Predicate, mut func(Doc) (Doc, error)) (int, error) {
 	n := 0
-	lines := make([][]byte, 0, len(c.docs))
-	for _, d := range c.docs {
+	lines := make([][]byte, 0, len(c.index))
+	for i := range c.index {
+		d, ok := c.mustDoc(i)
+		if !ok {
+			continue
+		}
 		if p.Match(d) {
 			nd, err := mut(d)
 			if err != nil {
@@ -276,8 +305,12 @@ func (c *Collection) Replace(p Predicate, d Doc) (int, error) {
 // DeleteWhere removes every doc matching p; returns the count removed.
 func (c *Collection) DeleteWhere(p Predicate) (int, error) {
 	n := 0
-	lines := make([][]byte, 0, len(c.docs))
-	for _, d := range c.docs {
+	lines := make([][]byte, 0, len(c.index))
+	for i := range c.index {
+		d, ok := c.mustDoc(i)
+		if !ok {
+			continue
+		}
 		if p.Match(d) {
 			n++
 			continue
@@ -292,9 +325,13 @@ func (c *Collection) DeleteWhere(p Predicate) (int, error) {
 
 // DeleteAt removes the doc at the given 1-based scan line.
 func (c *Collection) DeleteAt(line int) error {
-	lines := make([][]byte, 0, len(c.docs))
+	lines := make([][]byte, 0, len(c.index))
 	found := false
-	for _, d := range c.docs {
+	for i := range c.index {
+		d, ok := c.mustDoc(i)
+		if !ok {
+			continue
+		}
 		if d.Line() == line {
 			found = true
 			continue
@@ -310,8 +347,12 @@ func (c *Collection) DeleteAt(line int) error {
 // Compact rewrites the file, dropping blank lines and exact-duplicate records.
 func (c *Collection) Compact() error {
 	seen := map[string]bool{}
-	lines := make([][]byte, 0, len(c.docs))
-	for _, d := range c.docs {
+	lines := make([][]byte, 0, len(c.index))
+	for i := range c.index {
+		d, ok := c.mustDoc(i)
+		if !ok {
+			continue
+		}
 		key := string(d.Raw())
 		if seen[key] {
 			continue
