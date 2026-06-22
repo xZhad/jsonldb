@@ -15,6 +15,10 @@ type Collection struct {
 	file      *os.File // held open for the writer lock (Task 6)
 	threshold int64
 	cacheCap  int
+	index     []meta
+	cache     map[int]Doc
+	order     []int
+	lazy      bool
 }
 
 // Option configures a Collection at Open time.
@@ -41,7 +45,7 @@ func Open(path string, opts ...Option) (*Collection, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Collection{path: expanded, file: f, threshold: 8 << 20, cacheCap: 4096}
+	c := &Collection{path: expanded, file: f, threshold: 8 << 20, cacheCap: 4096, cache: map[int]Doc{}, order: []int{}}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -93,6 +97,11 @@ func (c *Collection) scan() error {
 		return err
 	}
 	c.docs = docs
+	if err := c.buildIndex(); err != nil {
+		return err
+	}
+	c.cache = nil
+	c.order = nil
 	return nil
 }
 
