@@ -10,14 +10,26 @@ import (
 
 // Collection is a file-backed JSONL store, loaded fully into memory.
 type Collection struct {
-	path string
-	docs []Doc
-	file *os.File // held open for the writer lock (Task 6)
+	path      string
+	docs      []Doc
+	file      *os.File // held open for the writer lock (Task 6)
+	threshold int64
+	cacheCap  int
 }
+
+// Option configures a Collection at Open time.
+type Option func(*Collection)
+
+// WithEagerThreshold sets the file-size cutoff (bytes) below which the whole
+// file is parsed eagerly at Open; larger files use lazy/streaming access.
+func WithEagerThreshold(bytes int64) Option { return func(c *Collection) { c.threshold = bytes } }
+
+// WithCacheSize sets the lazy-mode materialized-Doc LRU capacity.
+func WithCacheSize(n int) Option { return func(c *Collection) { c.cacheCap = n } }
 
 // Open returns a Collection backed by the JSONL file at path, scanning it into memory.
 // Creates the file and parent dirs if absent. Supports ~ expansion.
-func Open(path string) (*Collection, error) {
+func Open(path string, opts ...Option) (*Collection, error) {
 	expanded, err := expandPath(path)
 	if err != nil {
 		return nil, err
@@ -29,7 +41,10 @@ func Open(path string) (*Collection, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Collection{path: expanded, file: f}
+	c := &Collection{path: expanded, file: f, threshold: 8 << 20, cacheCap: 4096}
+	for _, opt := range opts {
+		opt(c)
+	}
 	if err := c.scan(); err != nil {
 		f.Close()
 		return nil, err
