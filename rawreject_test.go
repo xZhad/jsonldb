@@ -40,3 +40,19 @@ func TestRawRejectActuallyRejects(t *testing.T) {
 		t.Error("Eq must not reject a line containing the value")
 	}
 }
+
+func TestRawRejectEscapedStrings(t *testing.T) {
+	// value contains a double-quote → raw stores O\"Brien
+	raw := `{"name":"O\"Brien","note":"a\\b"}`
+	d, _ := parseDoc([]byte(raw), 1)
+	for _, p := range []Predicate{
+		Eq("name", `O"Brien`),
+		Eq("note", `a\b`),
+		Contains("name", `"Brien`),
+		Prefix("name", `O"`),
+	} {
+		if p.Match(d) && p.rawReject([]byte(raw)) {
+			t.Errorf("FALSE NEGATIVE: pred matched but rawReject dropped it (raw=%s)", raw)
+		}
+	}
+}

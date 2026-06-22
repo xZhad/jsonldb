@@ -37,11 +37,27 @@ func rawContainsFold(raw []byte, needle string) bool {
 	return bytes.Contains(bytes.ToLower(raw), bytes.ToLower([]byte(needle)))
 }
 
+// rawFilterable reports whether s appears byte-for-byte inside JSON-encoded
+// text (i.e. JSON would not escape any of its characters). Only such strings
+// are safe to use as a raw-bytes pre-filter needle.
+func rawFilterable(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 || c == '"' || c == '\\' {
+			return false
+		}
+	}
+	return true
+}
+
 // valueToken returns the literal substring that MUST appear in the raw JSON
 // if a string/number value is present. Returns "" when no safe token exists.
 func valueToken(v any) string {
 	switch x := v.(type) {
 	case string:
+		if !rawFilterable(x) {
+			return "" // string needs JSON escaping; disable pre-filter
+		}
 		return x // the string content appears within the quoted value
 	case json.Number:
 		return x.String()
@@ -91,6 +107,9 @@ func Contains(k, substr string) Predicate {
 			if want == "" {
 				return false
 			}
+			if !rawFilterable(substr) {
+				return false // needle needs JSON escaping; cannot safely pre-filter
+			}
 			return !rawContainsFold(raw, substr)
 		},
 	)
@@ -98,9 +117,15 @@ func Contains(k, substr string) Predicate {
 
 func HasKey(k string) Predicate {
 	keyTok := `"` + k + `"`
+	hasReject := rawFilterable(k)
 	return predR(
 		func(d Doc) bool { return d.Has(k) },
-		func(raw []byte) bool { return !bytes.Contains(raw, []byte(keyTok)) },
+		func(raw []byte) bool {
+			if !hasReject {
+				return false
+			}
+			return !bytes.Contains(raw, []byte(keyTok))
+		},
 	)
 }
 
@@ -110,6 +135,9 @@ func Prefix(k, p string) Predicate {
 		func(raw []byte) bool {
 			if p == "" {
 				return false
+			}
+			if !rawFilterable(p) {
+				return false // prefix needs JSON escaping; cannot safely pre-filter
 			}
 			return !bytes.Contains(raw, []byte(p))
 		},
@@ -121,6 +149,9 @@ func Suffix(k, s string) Predicate {
 		func(raw []byte) bool {
 			if s == "" {
 				return false
+			}
+			if !rawFilterable(s) {
+				return false // suffix needs JSON escaping; cannot safely pre-filter
 			}
 			return !bytes.Contains(raw, []byte(s))
 		},
