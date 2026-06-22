@@ -12,6 +12,21 @@ func openFixture(t *testing.T, lines string) *Collection {
 	return c
 }
 
+func TestResultIsIndexBacked(t *testing.T) {
+	c := openFixture(t, `{"id":"a"}
+{"id":"b"}
+{"id":"c"}
+`)
+	r := c.Where(Eq("id", "b"))
+	if r.col != c || len(r.idx) != 1 {
+		t.Fatalf("expected index-backed result with 1 idx, got idx=%v", r.idx)
+	}
+	d, ok := r.First()
+	if !ok || d.GetString("id") != "b" {
+		t.Errorf("First = %q", d.GetString("id"))
+	}
+}
+
 func TestWhereQueryFind(t *testing.T) {
 	c := openFixture(t, `{"id":"a","done":true,"dur":1500}
 {"id":"b","done":false,"dur":900}

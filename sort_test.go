@@ -7,7 +7,7 @@ func TestSortAndPage(t *testing.T) {
 {"id":"b","dur":1500}
 {"id":"c","dur":1200}
 `)
-	all := c.Where(func(Doc) bool { return true })
+	all := c.Where(pred(func(Doc) bool { return true }))
 
 	asc := all.SortBy("dur", false).Docs()
 	if asc[0].GetString("id") != "a" || asc[2].GetString("id") != "b" {
@@ -30,5 +30,21 @@ func TestSortAndPage(t *testing.T) {
 	pg := all.SortBy("dur", false).Page(2, 1).Docs()
 	if len(pg) != 1 || pg[0].GetString("id") != "c" {
 		t.Errorf("Page(2,1) = %v", pg)
+	}
+}
+
+func TestSortByExtractsOncePerRecord(t *testing.T) {
+	c := openFixture(t, `{"id":"a","dur":900}
+{"id":"b","dur":1500}
+{"id":"c","dur":1200}
+`)
+	r := c.Where(predTrue())
+	asc := r.SortBy("dur", false).Docs()
+	if asc[0].GetString("id") != "a" || asc[2].GetString("id") != "b" {
+		t.Errorf("asc order wrong")
+	}
+	// receiver not mutated
+	if r.Docs()[0].GetString("id") != "a" {
+		t.Errorf("SortBy mutated receiver")
 	}
 }

@@ -2,12 +2,17 @@ package jsonldb
 
 import "testing"
 
+// predTrue returns a predicate that matches all documents.
+func predTrue() Predicate {
+	return pred(func(Doc) bool { return true })
+}
+
 func TestAggregation(t *testing.T) {
 	c := openFixture(t, `{"topic":"ml","dur":1500}
 {"topic":"ml","dur":900}
 {"topic":"go","dur":1500}
 `)
-	all := c.Where(func(Doc) bool { return true })
+	all := c.Where(pred(func(Doc) bool { return true }))
 
 	groups := all.GroupBy("topic")
 	if groups["ml"].Count() != 2 || groups["go"].Count() != 1 {
@@ -40,5 +45,20 @@ func TestAggregation(t *testing.T) {
 	})
 	if gf["long"].Count() != 2 || gf["short"].Count() != 1 {
 		t.Errorf("GroupByFunc wrong")
+	}
+}
+
+func TestAggregationIndexBacked(t *testing.T) {
+	c := openFixture(t, `{"topic":"ml","dur":1500}
+{"topic":"ml","dur":900}
+{"topic":"go","dur":1500}
+`)
+	all := c.Where(predTrue())
+	if sum, ok := all.Sum("dur"); !ok || sum != 3900 {
+		t.Errorf("Sum = %v ok=%v, want 3900", sum, ok)
+	}
+	grp := all.GroupBy("topic")
+	if grp["ml"].Count() != 2 || grp["go"].Count() != 1 {
+		t.Errorf("GroupBy counts wrong: ml=%d go=%d", grp["ml"].Count(), grp["go"].Count())
 	}
 }

@@ -39,3 +39,22 @@ func TestSchemaKeysSample(t *testing.T) {
 		t.Errorf("Sample(-1) = %d docs, want 0 (no panic)", len(got))
 	}
 }
+
+func TestSchemaApproxFlag(t *testing.T) {
+	c := openFixture(t, `{"id":"a","topic":"ml"}
+{"id":"b","topic":"go"}
+`)
+	for _, f := range c.Schema() {
+		if f.Approx {
+			t.Errorf("eager schema must be exact, got Approx on %s", f.Key)
+		}
+	}
+	// force lazy
+	cl, _ := Open(c.Path(), WithEagerThreshold(0))
+	defer cl.Close()
+	for _, f := range cl.Schema() {
+		if !f.Approx {
+			t.Errorf("lazy schema must be Approx, got exact on %s", f.Key)
+		}
+	}
+}
