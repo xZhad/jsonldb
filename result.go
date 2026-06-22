@@ -93,68 +93,62 @@ func (r *Result) Distinct(field string) []any {
 	return out
 }
 
-func (r *Result) floats(field string) []float64 {
-	var out []float64
+// reduce folds over the result index, computing count, sum, min, and max of a numeric field.
+// Returns (count, sum, min, max).
+func (r *Result) reduce(field string) (count int, sum, mn, mx float64) {
+	first := true
 	for _, i := range r.idx {
-		if d, ok := r.col.mustDoc(i); ok {
-			if f, ok := d.GetFloat(field); ok {
-				out = append(out, f)
-			}
+		d, ok := r.col.mustDoc(i)
+		if !ok {
+			continue
 		}
+		f, ok := d.GetFloat(field)
+		if !ok {
+			continue
+		}
+		count++
+		sum += f
+		if first || f < mn {
+			mn = f
+		}
+		if first || f > mx {
+			mx = f
+		}
+		first = false
 	}
-	return out
+	return
 }
 
 func (r *Result) Sum(field string) (float64, bool) {
-	fs := r.floats(field)
-	if len(fs) == 0 {
+	n, s, _, _ := r.reduce(field)
+	if n == 0 {
 		return 0, false
-	}
-	s := 0.0
-	for _, f := range fs {
-		s += f
 	}
 	return s, true
 }
 
 func (r *Result) Avg(field string) (float64, bool) {
-	fs := r.floats(field)
-	if len(fs) == 0 {
+	n, s, _, _ := r.reduce(field)
+	if n == 0 {
 		return 0, false
 	}
-	s := 0.0
-	for _, f := range fs {
-		s += f
-	}
-	return s / float64(len(fs)), true
+	return s / float64(n), true
 }
 
 func (r *Result) Min(field string) (float64, bool) {
-	fs := r.floats(field)
-	if len(fs) == 0 {
+	n, _, mn, _ := r.reduce(field)
+	if n == 0 {
 		return 0, false
 	}
-	m := fs[0]
-	for _, f := range fs[1:] {
-		if f < m {
-			m = f
-		}
-	}
-	return m, true
+	return mn, true
 }
 
 func (r *Result) Max(field string) (float64, bool) {
-	fs := r.floats(field)
-	if len(fs) == 0 {
+	n, _, _, mx := r.reduce(field)
+	if n == 0 {
 		return 0, false
 	}
-	m := fs[0]
-	for _, f := range fs[1:] {
-		if f > m {
-			m = f
-		}
-	}
-	return m, true
+	return mx, true
 }
 
 // valueKey renders a value as a stable string group key.
