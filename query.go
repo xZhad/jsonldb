@@ -52,6 +52,13 @@ func rawFilterable(s string) bool {
 
 // valueToken returns the literal substring that MUST appear in the raw JSON
 // if a string/number value is present. Returns "" when no safe token exists.
+//
+// Safety principle: a token is only valid if it is a GUARANTEED byte-substring
+// of the canonical JSON encoding of the value. Unescaped strings satisfy this
+// (guarded by rawFilterable). Numbers do NOT: the stored form is not
+// canonicalized — 1500, 1.5e3, 15e2, 1500.0 all compare equal as floats but
+// share no common literal substring. Returning "" for numbers disables the
+// pre-filter, ensuring Eq never silently drops a true numeric match.
 func valueToken(v any) string {
 	switch x := v.(type) {
 	case string:
@@ -60,7 +67,8 @@ func valueToken(v any) string {
 		}
 		return x // the string content appears within the quoted value
 	case json.Number:
-		return x.String()
+		_ = x
+		return "" // numbers are not byte-canonical; never pre-filter
 	case bool, nil:
 		return "" // "true"/"false"/"null" are too common to pre-filter safely
 	}

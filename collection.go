@@ -151,8 +151,11 @@ func (c *Collection) Where(p Predicate) *Result {
 		if p.rawReject(raw) {
 			continue
 		}
-		d, ok := c.mustDoc(i)
-		if ok && p.Match(d) {
+		d, err := c.materializeFrom(i, raw)
+		if err != nil {
+			continue
+		}
+		if p.Match(d) {
 			idx = append(idx, i)
 		}
 	}
@@ -178,7 +181,11 @@ func (c *Collection) Find(p Predicate) (Doc, bool) {
 		if p.rawReject(raw) {
 			continue
 		}
-		if d, ok := c.mustDoc(i); ok && p.Match(d) {
+		d, err := c.materializeFrom(i, raw)
+		if err != nil {
+			continue
+		}
+		if p.Match(d) {
 			return d, true
 		}
 	}

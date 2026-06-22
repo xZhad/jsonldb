@@ -77,6 +77,21 @@ func (c *Collection) materialize(i int) (Doc, error) {
 	return d, nil
 }
 
+// materializeFrom parses record i from already-read raw bytes (avoiding a
+// second read), caching the result. Returns the cached Doc on a cache hit.
+func (c *Collection) materializeFrom(i int, raw []byte) (Doc, error) {
+	if d, ok := c.cache[i]; ok {
+		c.touch(i)
+		return d, nil
+	}
+	d, err := parseDoc(raw, c.index[i].line)
+	if err != nil {
+		return Doc{}, err
+	}
+	c.put(i, d)
+	return d, nil
+}
+
 // mustDoc materializes record i, returning ok=false on error (skip).
 func (c *Collection) mustDoc(i int) (Doc, bool) {
 	d, err := c.materialize(i)
