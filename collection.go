@@ -106,6 +106,36 @@ func (c *Collection) Last() (Doc, bool) {
 	return c.docs[len(c.docs)-1], true
 }
 
+// Where returns a Result of docs matching p.
+func (c *Collection) Where(p Predicate) *Result {
+	var out []Doc
+	for _, d := range c.docs {
+		if p(d) {
+			out = append(out, d)
+		}
+	}
+	return &Result{docs: out}
+}
+
+// Query parses a DSL string and returns the matching Result.
+func (c *Collection) Query(dsl string) (*Result, error) {
+	p, err := parseDSL(dsl)
+	if err != nil {
+		return nil, err
+	}
+	return c.Where(p), nil
+}
+
+// Find returns the first doc matching p.
+func (c *Collection) Find(p Predicate) (Doc, bool) {
+	for _, d := range c.docs {
+		if p(d) {
+			return d, true
+		}
+	}
+	return Doc{}, false
+}
+
 func expandPath(path string) (string, error) {
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
