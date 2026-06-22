@@ -71,6 +71,16 @@ func (c *Collection) Close() error {
 }
 
 func (c *Collection) scan() error {
+	// Close any existing file handle and reopen fresh from disk.
+	if c.file != nil {
+		c.file.Close()
+	}
+	f, err := os.OpenFile(c.path, os.O_RDWR, 0644)
+	if err != nil {
+		return err
+	}
+	c.file = f
+
 	if err := c.buildIndex(); err != nil {
 		return err
 	}
@@ -248,15 +258,6 @@ func (c *Collection) rewrite(lines [][]byte) error {
 	if err := os.Rename(tmpName, c.path); err != nil {
 		return err
 	}
-	// Reopen c.file so readRaw sees the new file content.
-	if c.file != nil {
-		c.file.Close()
-	}
-	newFile, err := os.OpenFile(c.path, os.O_RDWR, 0644)
-	if err != nil {
-		return err
-	}
-	c.file = newFile
 	return c.scan()
 }
 
