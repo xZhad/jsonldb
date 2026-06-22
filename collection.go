@@ -135,7 +135,7 @@ func (c *Collection) Last() (Doc, bool) {
 func (c *Collection) Where(p Predicate) *Result {
 	var out []Doc
 	for _, d := range c.docs {
-		if p(d) {
+		if p.Match(d) {
 			out = append(out, d)
 		}
 	}
@@ -154,7 +154,7 @@ func (c *Collection) Query(dsl string) (*Result, error) {
 // Find returns the first doc matching p.
 func (c *Collection) Find(p Predicate) (Doc, bool) {
 	for _, d := range c.docs {
-		if p(d) {
+		if p.Match(d) {
 			return d, true
 		}
 	}
@@ -242,7 +242,7 @@ func (c *Collection) updateChecked(p Predicate, mut func(Doc) (Doc, error)) (int
 	n := 0
 	lines := make([][]byte, 0, len(c.docs))
 	for _, d := range c.docs {
-		if p(d) {
+		if p.Match(d) {
 			nd, err := mut(d)
 			if err != nil {
 				return 0, err
@@ -278,7 +278,7 @@ func (c *Collection) DeleteWhere(p Predicate) (int, error) {
 	n := 0
 	lines := make([][]byte, 0, len(c.docs))
 	for _, d := range c.docs {
-		if p(d) {
+		if p.Match(d) {
 			n++
 			continue
 		}

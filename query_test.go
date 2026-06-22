@@ -37,7 +37,7 @@ func TestBuilderPredicates(t *testing.T) {
 		{"not", Not(Eq("completed", false)), true},
 	}
 	for _, tc := range cases {
-		if got := tc.p(d); got != tc.want {
+		if got := tc.p.Match(d); got != tc.want {
 			t.Errorf("%s = %v, want %v", tc.name, got, tc.want)
 		}
 	}

@@ -7,7 +7,7 @@ func TestSortAndPage(t *testing.T) {
 {"id":"b","dur":1500}
 {"id":"c","dur":1200}
 `)
-	all := c.Where(func(Doc) bool { return true })
+	all := c.Where(pred(func(Doc) bool { return true }))
 
 	asc := all.SortBy("dur", false).Docs()
 	if asc[0].GetString("id") != "a" || asc[2].GetString("id") != "b" {

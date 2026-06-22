@@ -32,7 +32,7 @@ func TestDSLParse(t *testing.T) {
 			t.Errorf("parse %q: %v", tc.dsl, err)
 			continue
 		}
-		if got := p(d); got != tc.want {
+		if got := p.Match(d); got != tc.want {
 			t.Errorf("%q = %v, want %v", tc.dsl, got, tc.want)
 		}
 	}

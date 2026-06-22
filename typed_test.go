@@ -80,7 +80,7 @@ func TestTypedUpdateAbortOnDecodeError(t *testing.T) {
 	}
 
 	// Predicate matches BOTH docs; the second will fail to decode.
-	n, updateErr := db.Update(func(d Doc) bool { return true }, func(s tBadSession) tBadSession {
+	n, updateErr := db.Update(pred(func(d Doc) bool { return true }), func(s tBadSession) tBadSession {
 		s.ID += "_updated"
 		return s
 	})

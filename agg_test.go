@@ -7,7 +7,7 @@ func TestAggregation(t *testing.T) {
 {"topic":"ml","dur":900}
 {"topic":"go","dur":1500}
 `)
-	all := c.Where(func(Doc) bool { return true })
+	all := c.Where(pred(func(Doc) bool { return true }))
 
 	groups := all.GroupBy("topic")
 	if groups["ml"].Count() != 2 || groups["go"].Count() != 1 {

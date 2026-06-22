@@ -88,33 +88,33 @@ func (p *parser) next() token { t := p.toks[p.pos]; p.pos++; return t }
 
 func parseDSL(input string) (Predicate, error) {
 	if strings.TrimSpace(input) == "" {
-		return func(Doc) bool { return true }, nil
+		return pred(func(Doc) bool { return true }), nil
 	}
 	toks, err := lexDSL(input)
 	if err != nil {
-		return nil, err
+		return Predicate{}, err
 	}
 	p := &parser{toks: toks}
-	pred, err := p.parseOr()
+	predicate, err := p.parseOr()
 	if err != nil {
-		return nil, err
+		return Predicate{}, err
 	}
 	if p.peek().kind != tEOF {
-		return nil, fmt.Errorf("unexpected token %q", p.peek().text)
+		return Predicate{}, fmt.Errorf("unexpected token %q", p.peek().text)
 	}
-	return pred, nil
+	return predicate, nil
 }
 
 func (p *parser) parseOr() (Predicate, error) {
 	left, err := p.parseAnd()
 	if err != nil {
-		return nil, err
+		return Predicate{}, err
 	}
 	for p.peek().kind == tOr {
 		p.next()
 		right, err := p.parseAnd()
 		if err != nil {
-			return nil, err
+			return Predicate{}, err
 		}
 		left = Or(left, right)
 	}
@@ -124,14 +124,14 @@ func (p *parser) parseOr() (Predicate, error) {
 func (p *parser) parseAnd() (Predicate, error) {
 	left, err := p.parseNot()
 	if err != nil {
-		return nil, err
+		return Predicate{}, err
 	}
 	for {
 		k := p.peek().kind
 		if k == tBang || k == tLParen || k == tClause {
 			right, err := p.parseNot()
 			if err != nil {
-				return nil, err
+				return Predicate{}, err
 			}
 			left = And(left, right)
 			continue
@@ -146,7 +146,7 @@ func (p *parser) parseNot() (Predicate, error) {
 		p.next()
 		inner, err := p.parseNot()
 		if err != nil {
-			return nil, err
+			return Predicate{}, err
 		}
 		return Not(inner), nil
 	}
@@ -159,17 +159,17 @@ func (p *parser) parseAtom() (Predicate, error) {
 		p.next()
 		inner, err := p.parseOr()
 		if err != nil {
-			return nil, err
+			return Predicate{}, err
 		}
 		if p.peek().kind != tRParen {
-			return nil, fmt.Errorf("expected ')'")
+			return Predicate{}, fmt.Errorf("expected ')'")
 		}
 		p.next()
 		return inner, nil
 	case tClause:
 		return clauseToPredicate(p.next().text)
 	default:
-		return nil, fmt.Errorf("unexpected token %q", p.peek().text)
+		return Predicate{}, fmt.Errorf("unexpected token %q", p.peek().text)
 	}
 }
 
@@ -196,17 +196,17 @@ func clauseToPredicate(clause string) (Predicate, error) {
 			key := strings.TrimSpace(clause[:idx])
 			raw := strings.TrimSpace(clause[idx+len(o.op):])
 			if key == "" {
-				return nil, fmt.Errorf("empty key in %q", clause)
+				return Predicate{}, fmt.Errorf("empty key in %q", clause)
 			}
 			if raw == "" {
-				return nil, fmt.Errorf("empty value in %q", clause)
+				return Predicate{}, fmt.Errorf("empty value in %q", clause)
 			}
 			return o.mk(key, raw)
 		}
 	}
 	// bare key = HasKey
 	if strings.ContainsAny(clause, "=<>~^$!") {
-		return nil, fmt.Errorf("malformed clause %q", clause)
+		return Predicate{}, fmt.Errorf("malformed clause %q", clause)
 	}
 	return HasKey(clause), nil
 }
