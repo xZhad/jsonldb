@@ -1,6 +1,9 @@
 package jsonldb
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"sort"
+)
 
 // Result is a chainable view over a filtered set of Docs.
 type Result struct {
@@ -151,4 +154,58 @@ func valueKey(v any) string {
 	}
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// SortBy returns a new Result sorted by field using the coercion ladder.
+// Docs missing the field sort last.
+func (r *Result) SortBy(field string, desc bool) *Result {
+	cp := make([]Doc, len(r.docs))
+	copy(cp, r.docs)
+	sort.SliceStable(cp, func(i, j int) bool {
+		vi, oki := cp[i].Get(field)
+		vj, okj := cp[j].Get(field)
+		if !oki || !okj {
+			if oki != okj {
+				return oki // present sorts before missing
+			}
+			return false
+		}
+		c, ok := compareValues(vi, vj)
+		if !ok {
+			return false
+		}
+		if desc {
+			return c > 0
+		}
+		return c < 0
+	})
+	return &Result{docs: cp}
+}
+
+func (r *Result) Limit(n int) *Result {
+	if n < 0 {
+		n = 0
+	}
+	if n > len(r.docs) {
+		n = len(r.docs)
+	}
+	return &Result{docs: r.docs[:n]}
+}
+
+func (r *Result) Offset(n int) *Result {
+	if n < 0 {
+		n = 0
+	}
+	if n > len(r.docs) {
+		n = len(r.docs)
+	}
+	return &Result{docs: r.docs[n:]}
+}
+
+// Page returns 1-based page num of the given size.
+func (r *Result) Page(num, size int) *Result {
+	if num < 1 || size < 1 {
+		return &Result{}
+	}
+	return r.Offset((num - 1) * size).Limit(size)
 }
