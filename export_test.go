@@ -119,3 +119,33 @@ func TestCSVNonScalarAndMissing(t *testing.T) {
 		t.Errorf("row b tags cell = %q, want empty", rows[2][1])
 	}
 }
+
+func TestWriteMarkdown(t *testing.T) {
+	c := openExportFixture(t)
+	var buf bytes.Buffer
+	if err := c.Where(predTrue()).Project("id", "topic").WriteMarkdown(&buf); err != nil {
+		t.Fatal(err)
+	}
+	want := "| id | topic |\n| --- | --- |\n| a | ml |\n| b | go |\n"
+	if buf.String() != want {
+		t.Errorf("WriteMarkdown =\n%q\nwant\n%q", buf.String(), want)
+	}
+}
+
+func TestMarkdownEscaping(t *testing.T) {
+	c, err := Open(fixtureFile(t, `{"id":"a","note":"x|y\nz"}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	var buf bytes.Buffer
+	if err := c.Where(predTrue()).Project("id", "note").WriteMarkdown(&buf); err != nil {
+		t.Fatal(err)
+	}
+	// pipe escaped, newline collapsed to a space → table stays rectangular
+	want := "| id | note |\n| --- | --- |\n| a | x\\|y z |\n"
+	if buf.String() != want {
+		t.Errorf("MD escaping =\n%q\nwant\n%q", buf.String(), want)
+	}
+}

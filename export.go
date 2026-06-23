@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"io"
+	"strings"
 )
 
 // Project returns a new Result that narrows each doc to the given keys (in
@@ -145,4 +146,52 @@ func (r *Result) WriteCSV(w io.Writer) error {
 	}
 	cw.Flush()
 	return cw.Error()
+}
+
+// mdEscape makes a value safe for a markdown table cell: escape pipes, collapse
+// newlines to a space so the row stays on one line.
+func mdEscape(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return s
+}
+
+func writeMDRow(w io.Writer, cells []string) error {
+	_, err := io.WriteString(w, "| "+strings.Join(cells, " | ")+" |\n")
+	return err
+}
+
+// WriteMarkdown writes a markdown table (header + separator + rows). Streams.
+func (r *Result) WriteMarkdown(w io.Writer) error {
+	cols := r.columns()
+	if len(cols) == 0 {
+		return nil
+	}
+	header := make([]string, len(cols))
+	sep := make([]string, len(cols))
+	for i, c := range cols {
+		header[i] = mdEscape(c)
+		sep[i] = "---"
+	}
+	if err := writeMDRow(w, header); err != nil {
+		return err
+	}
+	if err := writeMDRow(w, sep); err != nil {
+		return err
+	}
+	for _, i := range r.idx {
+		d, ok := r.col.mustDoc(i)
+		if !ok {
+			continue
+		}
+		row := make([]string, len(cols))
+		for j, c := range cols {
+			row[j] = mdEscape(cellValue(d, c))
+		}
+		if err := writeMDRow(w, row); err != nil {
+			return err
+		}
+	}
+	return nil
 }
