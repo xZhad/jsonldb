@@ -48,3 +48,55 @@ func TestSortByExtractsOncePerRecord(t *testing.T) {
 		t.Errorf("SortBy mutated receiver")
 	}
 }
+
+func TestSortWithNullsAndMixed(t *testing.T) {
+	c := openFixture(t, `{"id":"a","n":3}
+{"id":"b","n":null}
+{"id":"c","n":1}
+{"id":"d"}
+{"id":"e","n":2}
+`)
+	all := c.Where(predTrue())
+
+	asc := all.SortBy("n", false).Docs()
+	got := ""
+	for _, d := range asc {
+		got += d.GetString("id")
+	}
+	// 1,2,3 first (c,e,a) then null/absent last (b,d in stable order)
+	if got != "ceabd" {
+		t.Errorf("asc with nulls = %q, want ceabd", got)
+	}
+
+	desc := all.SortBy("n", true).Docs()
+	got = ""
+	for _, d := range desc {
+		got += d.GetString("id")
+	}
+	// 3,2,1 (a,e,c) then null/absent still last (b,d)
+	if got != "aecbd" {
+		t.Errorf("desc with nulls = %q, want aecbd", got)
+	}
+}
+
+func TestSortMixedTypesDeterministic(t *testing.T) {
+	c := openFixture(t, `{"id":"a","v":"hello"}
+{"id":"b","v":10}
+{"id":"c","v":true}
+{"id":"d","v":2}
+`)
+	one := c.Where(predTrue()).SortBy("v", false).Docs()
+	two := c.Where(predTrue()).SortBy("v", false).Docs()
+	s1, s2 := "", ""
+	for i := range one {
+		s1 += one[i].GetString("id")
+		s2 += two[i].GetString("id")
+	}
+	if s1 != s2 {
+		t.Errorf("mixed-type sort not deterministic: %q vs %q", s1, s2)
+	}
+	// numbers (rank 0) sort before strings (rank 2) before bools (rank 3)
+	if s1 != "dbac" {
+		t.Errorf("mixed-type order = %q, want dbac (2,10,hello,true)", s1)
+	}
+}

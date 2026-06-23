@@ -3,6 +3,7 @@ package jsonldb
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -240,6 +241,41 @@ func compareValues(a, b any) (int, bool) {
 		return strings.Compare(av, bv), true
 	}
 	return 0, false
+}
+
+// sortRank groups coerced values into ordered type buckets so that a column
+// mixing types still has a deterministic, sensible order (numbers, then dates,
+// then strings, then bools, then anything else).
+func sortRank(c any) int {
+	switch c.(type) {
+	case float64:
+		return 0
+	case time.Time:
+		return 1
+	case string:
+		return 2
+	case bool:
+		return 3
+	default:
+		return 4
+	}
+}
+
+// compareForSort returns a total order (-1/0/1) over arbitrary JSON values:
+// first by type bucket, then within a bucket by value, falling back to the
+// string form so the result is always deterministic (never an unstable 0).
+func compareForSort(a, b any) int {
+	ca, cb := coerce(a), coerce(b)
+	if ra, rb := sortRank(ca), sortRank(cb); ra != rb {
+		if ra < rb {
+			return -1
+		}
+		return 1
+	}
+	if c, ok := compareValues(a, b); ok {
+		return c
+	}
+	return strings.Compare(fmt.Sprintf("%v", ca), fmt.Sprintf("%v", cb))
 }
 
 // equalValues compares for equality across coerced types.

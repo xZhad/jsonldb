@@ -193,16 +193,16 @@ func (r *Result) SortBy(field string, desc bool) *Result {
 		items[n] = it
 	}
 	sort.SliceStable(items, func(a, b int) bool {
-		if !items[a].present || !items[b].present {
-			if items[a].present != items[b].present {
-				return items[a].present
+		// Missing keys and JSON nulls always sort last, in both directions.
+		na := !items[a].present || items[a].v == nil
+		nb := !items[b].present || items[b].v == nil
+		if na || nb {
+			if na != nb {
+				return nb // b is the null/absent one → a comes first
 			}
 			return false
 		}
-		cc, ok := compareValues(items[a].v, items[b].v)
-		if !ok {
-			return false
-		}
+		cc := compareForSort(items[a].v, items[b].v)
 		if desc {
 			return cc > 0
 		}
