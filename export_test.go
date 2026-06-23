@@ -228,3 +228,27 @@ func TestExportLazyEagerParity(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectionSurvivesChaining(t *testing.T) {
+	c := openExportFixture(t)
+	var buf bytes.Buffer
+	if err := c.Where(predTrue()).Project("id").SortBy("id", false).Limit(1).WriteCSV(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if buf.String() != "id\na\n" { // only the projected column, only 1 row
+		t.Errorf("projection lost through chaining: %q", buf.String())
+	}
+}
+
+func TestProjectNoArgs(t *testing.T) {
+	c := openExportFixture(t)
+	// Project() with no args should return receiver unchanged → full docs
+	docs := c.Where(predTrue()).Project().Docs()
+	if len(docs) != 2 {
+		t.Fatalf("got %d docs, want 2", len(docs))
+	}
+	// dur should still be present (no projection)
+	if _, ok := docs[0].Get("dur"); !ok {
+		t.Errorf("dur should be present when Project() has no args")
+	}
+}

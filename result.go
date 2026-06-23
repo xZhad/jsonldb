@@ -212,7 +212,7 @@ func (r *Result) SortBy(field string, desc bool) *Result {
 	for n, it := range items {
 		idx[n] = it.i
 	}
-	return &Result{col: r.col, idx: idx}
+	return &Result{col: r.col, idx: idx, project: r.project}
 }
 
 func (r *Result) Limit(n int) *Result {
@@ -222,7 +222,7 @@ func (r *Result) Limit(n int) *Result {
 	if n > len(r.idx) {
 		n = len(r.idx)
 	}
-	return &Result{col: r.col, idx: r.idx[:n]}
+	return &Result{col: r.col, idx: r.idx[:n], project: r.project}
 }
 
 func (r *Result) Offset(n int) *Result {
@@ -232,13 +232,13 @@ func (r *Result) Offset(n int) *Result {
 	if n > len(r.idx) {
 		n = len(r.idx)
 	}
-	return &Result{col: r.col, idx: r.idx[n:]}
+	return &Result{col: r.col, idx: r.idx[n:], project: r.project}
 }
 
 // Page returns 1-based page num of the given size.
 func (r *Result) Page(num, size int) *Result {
 	if num < 1 || size < 1 {
-		return &Result{col: r.col}
+		return &Result{col: r.col, project: r.project}
 	}
 	return r.Offset((num - 1) * size).Limit(size)
 }

@@ -11,6 +11,9 @@ import (
 // order) at output time — for Docs() and the Write* methods. It does not
 // re-filter; do filtering/sorting/aggregation before projecting.
 func (r *Result) Project(keys ...string) *Result {
+	if len(keys) == 0 {
+		return r
+	}
 	return &Result{col: r.col, idx: r.idx, project: append([]string(nil), keys...)}
 }
 
