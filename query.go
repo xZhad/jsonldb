@@ -78,7 +78,7 @@ func valueToken(v any) string {
 func Eq(k string, v any) Predicate {
 	tok := valueToken(v) // "" ⇒ cannot pre-filter
 	return predR(
-		func(d Doc) bool { x, ok := d.Get(k); return ok && equalValues(x, v) },
+		func(d Doc) bool { x, ok := d.getField(k); return ok && equalValues(x, v) },
 		func(raw []byte) bool {
 			if tok == "" {
 				return false
@@ -88,12 +88,12 @@ func Eq(k string, v any) Predicate {
 	)
 }
 func Ne(k string, v any) Predicate {
-	return pred(func(d Doc) bool { x, ok := d.Get(k); return !ok || !equalValues(x, v) })
+	return pred(func(d Doc) bool { x, ok := d.getField(k); return !ok || !equalValues(x, v) })
 }
 
 func ordered(k string, v any, want func(c int) bool) Predicate {
 	return pred(func(d Doc) bool {
-		x, ok := d.Get(k)
+		x, ok := d.getField(k)
 		if !ok {
 			return false
 		}
@@ -110,7 +110,7 @@ func Lte(k string, v any) Predicate { return ordered(k, v, func(c int) bool { re
 func Contains(k, substr string) Predicate {
 	want := strings.ToLower(substr)
 	return predR(
-		func(d Doc) bool { return strings.Contains(strings.ToLower(d.GetString(k)), want) },
+		func(d Doc) bool { return strings.Contains(strings.ToLower(d.getStringField(k)), want) },
 		func(raw []byte) bool {
 			if want == "" {
 				return false
@@ -125,9 +125,9 @@ func Contains(k, substr string) Predicate {
 
 func HasKey(k string) Predicate {
 	keyTok := `"` + k + `"`
-	hasReject := rawFilterable(k)
+	hasReject := rawFilterable(k) && !strings.Contains(k, ".")
 	return predR(
-		func(d Doc) bool { return d.Has(k) },
+		func(d Doc) bool { _, ok := d.getField(k); return ok },
 		func(raw []byte) bool {
 			if !hasReject {
 				return false
@@ -139,7 +139,7 @@ func HasKey(k string) Predicate {
 
 func Prefix(k, p string) Predicate {
 	return predR(
-		func(d Doc) bool { return strings.HasPrefix(d.GetString(k), p) },
+		func(d Doc) bool { return strings.HasPrefix(d.getStringField(k), p) },
 		func(raw []byte) bool {
 			if p == "" {
 				return false
@@ -153,7 +153,7 @@ func Prefix(k, p string) Predicate {
 }
 func Suffix(k, s string) Predicate {
 	return predR(
-		func(d Doc) bool { return strings.HasSuffix(d.GetString(k), s) },
+		func(d Doc) bool { return strings.HasSuffix(d.getStringField(k), s) },
 		func(raw []byte) bool {
 			if s == "" {
 				return false
@@ -171,12 +171,12 @@ func Regex(k, pattern string) Predicate {
 	if err != nil {
 		return pred(func(Doc) bool { return false })
 	}
-	return pred(func(d Doc) bool { return re.MatchString(d.GetString(k)) })
+	return pred(func(d Doc) bool { return re.MatchString(d.getStringField(k)) })
 }
 
 func In(k string, vs ...any) Predicate {
 	return pred(func(d Doc) bool {
-		x, ok := d.Get(k)
+		x, ok := d.getField(k)
 		if !ok {
 			return false
 		}

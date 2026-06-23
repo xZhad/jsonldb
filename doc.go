@@ -109,6 +109,46 @@ func (d Doc) Path(dotted string) (any, bool) {
 	return cur, true
 }
 
+// getField resolves a key: dotted keys ("message.role", "notes.0.text") go
+// through Path; plain keys through Get. Used by queries, sort, and aggregation
+// so nested fields work everywhere top-level keys do.
+func (d Doc) getField(key string) (any, bool) {
+	if strings.Contains(key, ".") {
+		return d.Path(key)
+	}
+	return d.Get(key)
+}
+
+func (d Doc) getStringField(key string) string {
+	if !strings.Contains(key, ".") {
+		return d.GetString(key)
+	}
+	if v, ok := d.Path(key); ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+func (d Doc) getFloatField(key string) (float64, bool) {
+	if !strings.Contains(key, ".") {
+		return d.GetFloat(key)
+	}
+	v, ok := d.Path(key)
+	if !ok {
+		return 0, false
+	}
+	switch n := v.(type) {
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	case float64:
+		return n, true
+	}
+	return 0, false
+}
+
 // MarshalJSON emits m in stable (sorted) key order for deterministic rewrites.
 func (d Doc) MarshalJSON() ([]byte, error) {
 	keys := make([]string, 0, len(d.m))

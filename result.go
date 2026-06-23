@@ -63,7 +63,7 @@ func (r *Result) GroupByFunc(fn func(Doc) string) map[string]*Result {
 
 func (r *Result) GroupBy(field string) map[string]*Result {
 	return r.GroupByFunc(func(d Doc) string {
-		if v, ok := d.Get(field); ok {
+		if v, ok := d.getField(field); ok {
 			return valueKey(v)
 		}
 		return ""
@@ -74,7 +74,7 @@ func (r *Result) CountBy(field string) map[string]int {
 	out := map[string]int{}
 	for _, i := range r.idx {
 		if d, ok := r.col.mustDoc(i); ok {
-			if v, ok := d.Get(field); ok {
+			if v, ok := d.getField(field); ok {
 				out[valueKey(v)]++
 			}
 		}
@@ -87,7 +87,7 @@ func (r *Result) Distinct(field string) []any {
 	seen := map[string]bool{}
 	for _, i := range r.idx {
 		if d, ok := r.col.mustDoc(i); ok {
-			if v, ok := d.Get(field); ok {
+			if v, ok := d.getField(field); ok {
 				k := valueKey(v)
 				if !seen[k] {
 					seen[k] = true
@@ -108,7 +108,7 @@ func (r *Result) reduce(field string) (count int, sum, mn, mx float64) {
 		if !ok {
 			continue
 		}
-		f, ok := d.GetFloat(field)
+		f, ok := d.getFloatField(field)
 		if !ok {
 			continue
 		}
@@ -188,7 +188,7 @@ func (r *Result) SortBy(field string, desc bool) *Result {
 	for n, i := range r.idx {
 		it := kv{i: i}
 		if d, ok := r.col.mustDoc(i); ok {
-			it.v, it.present = d.Get(field)
+			it.v, it.present = d.getField(field)
 		}
 		items[n] = it
 	}
