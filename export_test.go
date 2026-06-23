@@ -2,6 +2,7 @@ package jsonldb
 
 import (
 	"bytes"
+	"encoding/csv"
 	"testing"
 )
 
@@ -76,5 +77,45 @@ func TestWriteJSON(t *testing.T) {
 	}
 	if eb.String() != "[]" {
 		t.Errorf("empty WriteJSON = %q, want []", eb.String())
+	}
+}
+
+func TestWriteCSV(t *testing.T) {
+	c := openExportFixture(t)
+	var buf bytes.Buffer
+	if err := c.Where(predTrue()).Project("id", "topic", "dur").WriteCSV(&buf); err != nil {
+		t.Fatal(err)
+	}
+	// header in projection order, then rows
+	got := buf.String()
+	want := "id,topic,dur\na,ml,1500\nb,go,900\n"
+	if got != want {
+		t.Errorf("WriteCSV =\n%q\nwant\n%q", got, want)
+	}
+	// round-trips through encoding/csv
+	if _, err := csv.NewReader(bytes.NewReader(buf.Bytes())).ReadAll(); err != nil {
+		t.Errorf("CSV not parseable: %v", err)
+	}
+}
+
+func TestCSVNonScalarAndMissing(t *testing.T) {
+	c, err := Open(fixtureFile(t, `{"id":"a","tags":["x","y"]}
+{"id":"b"}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	var buf bytes.Buffer
+	if err := c.Where(predTrue()).Project("id", "tags").WriteCSV(&buf); err != nil {
+		t.Fatal(err)
+	}
+	// non-scalar tags → JSON-encoded cell (csv-quoted); missing tags → empty cell
+	rows, _ := csv.NewReader(bytes.NewReader(buf.Bytes())).ReadAll()
+	if rows[1][1] != `["x","y"]` {
+		t.Errorf("row a tags cell = %q, want JSON array", rows[1][1])
+	}
+	if rows[2][1] != "" {
+		t.Errorf("row b tags cell = %q, want empty", rows[2][1])
 	}
 }
