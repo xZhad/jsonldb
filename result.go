@@ -7,16 +7,22 @@ import (
 
 // Result is a chainable view over a filtered set of Docs, backed by index positions.
 type Result struct {
-	col *Collection
-	idx []int
+	col     *Collection
+	idx     []int
+	project []string // nil = no projection; else ordered key subset for output
 }
 
 func (r *Result) Docs() []Doc {
 	out := make([]Doc, 0, len(r.idx))
 	for _, i := range r.idx {
-		if d, ok := r.col.mustDoc(i); ok {
-			out = append(out, d)
+		d, ok := r.col.mustDoc(i)
+		if !ok {
+			continue
 		}
+		if r.project != nil {
+			d = narrowDoc(d, r.project)
+		}
+		out = append(out, d)
 	}
 	return out
 }
@@ -206,7 +212,7 @@ func (r *Result) SortBy(field string, desc bool) *Result {
 	for n, it := range items {
 		idx[n] = it.i
 	}
-	return &Result{col: r.col, idx: idx}
+	return &Result{col: r.col, idx: idx, project: r.project}
 }
 
 func (r *Result) Limit(n int) *Result {
@@ -216,7 +222,7 @@ func (r *Result) Limit(n int) *Result {
 	if n > len(r.idx) {
 		n = len(r.idx)
 	}
-	return &Result{col: r.col, idx: r.idx[:n]}
+	return &Result{col: r.col, idx: r.idx[:n], project: r.project}
 }
 
 func (r *Result) Offset(n int) *Result {
@@ -226,13 +232,13 @@ func (r *Result) Offset(n int) *Result {
 	if n > len(r.idx) {
 		n = len(r.idx)
 	}
-	return &Result{col: r.col, idx: r.idx[n:]}
+	return &Result{col: r.col, idx: r.idx[n:], project: r.project}
 }
 
 // Page returns 1-based page num of the given size.
 func (r *Result) Page(num, size int) *Result {
 	if num < 1 || size < 1 {
-		return &Result{col: r.col}
+		return &Result{col: r.col, project: r.project}
 	}
 	return r.Offset((num - 1) * size).Limit(size)
 }
