@@ -7,16 +7,22 @@ import (
 
 // Result is a chainable view over a filtered set of Docs, backed by index positions.
 type Result struct {
-	col *Collection
-	idx []int
+	col     *Collection
+	idx     []int
+	project []string // nil = no projection; else ordered key subset for output
 }
 
 func (r *Result) Docs() []Doc {
 	out := make([]Doc, 0, len(r.idx))
 	for _, i := range r.idx {
-		if d, ok := r.col.mustDoc(i); ok {
-			out = append(out, d)
+		d, ok := r.col.mustDoc(i)
+		if !ok {
+			continue
 		}
+		if r.project != nil {
+			d = narrowDoc(d, r.project)
+		}
+		out = append(out, d)
 	}
 	return out
 }
