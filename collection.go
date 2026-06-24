@@ -18,7 +18,11 @@ type Collection struct {
 	cache     map[int]Doc
 	order     []int
 	lazy      bool
+	skipped   int // malformed lines skipped on the last eager scan
 }
+
+// Skipped reports how many malformed lines were skipped during the last scan.
+func (c *Collection) Skipped() int { return c.skipped }
 
 // Option configures a Collection at Open time.
 type Option func(*Collection)
@@ -91,11 +95,13 @@ func (c *Collection) scan() error {
 	c.lazy = fi.Size() > c.threshold
 	c.cache = map[int]Doc{}
 	c.order = nil
+	c.skipped = 0
 	if !c.lazy {
-		// eager: parse everything now; a malformed line is fatal (as before)
+		// eager: parse everything now; malformed lines are skipped (and counted),
+		// matching the lazy path where mustDoc drops unparseable records.
 		for i := range c.index {
 			if _, err := c.materialize(i); err != nil {
-				return err
+				c.skipped++
 			}
 		}
 	}

@@ -72,3 +72,18 @@ func TestEachStops(t *testing.T) {
 		t.Errorf("Each saw %d, want 2 (stopped at b)", seen)
 	}
 }
+
+func TestSkipMalformedLines(t *testing.T) {
+	c := openFixture(t, `{"a":1}
+this is not json
+{"a":2}
+{bad
+{"a":3}
+`)
+	if got := c.Where(predTrue()).Count(); got != 3 {
+		t.Errorf("parseable count = %d, want 3", got)
+	}
+	if c.Skipped() != 2 {
+		t.Errorf("skipped = %d, want 2", c.Skipped())
+	}
+}
